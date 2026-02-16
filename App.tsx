@@ -5,7 +5,7 @@ import { ControlBar } from './components/ControlBar';
 import { TranslationSidebar } from './components/TranslationSidebar';
 import { CallState, TranscriptionItem, TranslationMode, Language } from './types';
 import { SUPPORTED_LANGUAGES } from './constants';
-import { Sparkles, Globe, Mic, MicOff, Video, AlertCircle } from 'lucide-react';
+import { Sparkles, Globe, Mic, MicOff, Video, AlertCircle, RefreshCw } from 'lucide-react';
 
 // Use environment variable for API Key
 const API_KEY = process.env.API_KEY || '';
@@ -30,37 +30,56 @@ const App: React.FC = () => {
   // Services
   const liveServiceRef = useRef<GeminiLiveService | null>(null);
   const userVideoRef = useRef<HTMLVideoElement>(null);
+  const streamRef = useRef<MediaStream | null>(null); // Ref to track stream for cleanup
+
+  const requestMedia = useCallback(async () => {
+    setError(null);
+    
+    // Check for browser support
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      setError("Media devices not supported in this browser or context (requires HTTPS).");
+      return;
+    }
+
+    try {
+      // Stop existing tracks if any
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach(track => track.stop());
+        streamRef.current = null;
+        setUserStream(null);
+      }
+
+      // First try requesting both
+      const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+      streamRef.current = stream;
+      setUserStream(stream);
+      setIsCameraOn(true);
+      setError(null);
+    } catch (err) {
+      console.warn("Camera+Audio access failed, trying Audio only", err);
+      // If video fails (e.g. no camera), try audio only
+      try {
+        const audioStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        streamRef.current = audioStream;
+        setUserStream(audioStream);
+        setIsCameraOn(false);
+        setError(null);
+      } catch (audioErr) {
+        console.error("Audio access denied", audioErr);
+        setError("Permission denied. Please allow access to camera and microphone.");
+      }
+    }
+  }, []);
 
   // Initialize Camera for Lobby
   useEffect(() => {
-    const initCamera = async () => {
-      try {
-        // Try getting both video and audio
-        const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
-        setUserStream(stream);
-        setIsCameraOn(true);
-      } catch (err) {
-        console.warn("Camera+Audio access failed, trying Audio only", err);
-        try {
-            // Fallback: Try audio only
-            const audioStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-            setUserStream(audioStream);
-            setIsCameraOn(false); // Force camera off since we only have audio
-            setError(null);
-        } catch (audioErr) {
-            console.error("Audio access denied", audioErr);
-            setError("Could not access camera or microphone. Please check system permissions.");
-        }
-      }
-    };
-    initCamera();
+    requestMedia();
     return () => {
-      if (userStream) {
-        userStream.getTracks().forEach(track => track.stop());
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach(track => track.stop());
       }
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [requestMedia]);
 
   const toggleMute = () => {
     if (userStream) {
@@ -73,7 +92,11 @@ const App: React.FC = () => {
   };
 
   const toggleCamera = async () => {
-    if (!userStream) return;
+    if (!userStream) {
+        // If no stream exists (e.g. initial error), try to request full media again
+        await requestMedia();
+        return;
+    }
 
     const videoTrack = userStream.getVideoTracks()[0];
     
@@ -87,15 +110,14 @@ const App: React.FC = () => {
         if (!isCameraOn) {
             try {
                 const newStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
-                // Stop old tracks to release hardware
+                
+                // Stop old audio-only stream
                 userStream.getTracks().forEach(t => t.stop());
                 
+                streamRef.current = newStream;
                 setUserStream(newStream);
                 setIsCameraOn(true);
                 setError(null);
-                
-                // If we are in a call, we might need to handle stream update logic here 
-                // but GeminiLiveService creates its own audio stream, so visual update is enough.
             } catch (err) {
                 console.error("Failed to upgrade to video", err);
                 setError("Could not access camera. Continuing with audio only.");
@@ -157,12 +179,6 @@ const App: React.FC = () => {
     setCallState(CallState.LOBBY);
     setTranscriptions([]);
   };
-
-  // Re-connect if language settings change while active
-  // Note: Gemini Live API currently doesn't support changing config mid-session easily without reconnect.
-  // For this demo, we will just update the ref for future calls, or we could force a reconnect.
-  // To keep it simple and stable, we won't auto-reconnect, but the user can restart.
-  // However, the prompt implies "realtime" changes. Let's stick to initial config for stability in this version.
   
   if (callState === CallState.LOBBY) {
     return (
@@ -182,7 +198,7 @@ const App: React.FC = () => {
                        <div className="w-24 h-24 rounded-full bg-purple-500 flex items-center justify-center text-4xl font-semibold shadow-lg">
                            Y
                        </div>
-                       {!userStream && <div className="absolute bottom-1/3 text-gray-400 text-sm">Loading camera...</div>}
+                       {!userStream && !error && <div className="absolute bottom-1/3 text-gray-400 text-sm animate-pulse">Initializing camera...</div>}
                    </div>
                )}
                
@@ -211,16 +227,24 @@ const App: React.FC = () => {
                 </div>
                 
                 {error && (
-                    <div className="bg-red-900/50 border border-red-500 text-red-200 p-3 rounded-lg flex items-center gap-2 text-sm max-w-xs">
-                        <AlertCircle size={16} className="shrink-0" />
-                        <span>{error}</span>
+                    <div className="bg-red-900/50 border border-red-500 text-red-200 p-4 rounded-xl flex flex-col gap-3 text-sm w-full max-w-sm">
+                        <div className="flex items-start gap-2">
+                             <AlertCircle size={18} className="shrink-0 mt-0.5" />
+                             <span className="leading-snug">{error}</span>
+                        </div>
+                        <button 
+                            onClick={requestMedia}
+                            className="self-start bg-red-800 hover:bg-red-700 text-white px-4 py-2 rounded-lg text-xs font-medium flex items-center gap-2 transition-colors"
+                        >
+                            <RefreshCw size={14} /> Try Again
+                        </button>
                     </div>
                 )}
 
                 <div className="flex gap-4">
                     <button 
                         onClick={startCall}
-                        disabled={!userStream && !error} // Allow retrying if error, but disable if just loading
+                        disabled={!userStream && !error} // Allow retrying if error via Join button too in some cases, but main retry is above
                         className={`bg-[#8ab4f8] hover:bg-[#aecbfa] text-[#202124] px-8 py-3 rounded-full font-medium text-lg transition-transform active:scale-95 flex items-center gap-2 shadow-lg hover:shadow-blue-500/20 ${(!userStream && !error) ? 'opacity-50 cursor-not-allowed' : ''}`}
                     >
                         <Sparkles size={20} />
