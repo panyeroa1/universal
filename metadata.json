@@ -1,0 +1,8 @@
+{
+  "name": "Orbit - Universal Translator",
+  "description": "A Google Meet-inspired interface featuring real-time speech translation and conversational AI powered by Gemini Live API.",
+  "requestFramePermissions": [
+    "camera",
+    "microphone"
+  ]
+}
