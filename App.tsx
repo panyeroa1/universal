@@ -5,12 +5,12 @@ import { ControlBar } from './components/ControlBar';
 import { TranslationSidebar } from './components/TranslationSidebar';
 import { CallState, TranscriptionItem, TranslationMode, Language } from './types';
 import { SUPPORTED_LANGUAGES } from './constants';
-import { Sparkles, Globe, Mic, MicOff, Video, AlertCircle, RefreshCw } from 'lucide-react';
+import { Sparkles, Globe, Mic, MicOff, Video, VideoOff, AlertCircle, RefreshCw } from 'lucide-react';
 
 // Use environment variable for API Key
 const API_KEY = process.env.API_KEY || '';
 
-const App: React.FC = () => {
+export const App: React.FC = () => {
   // State
   const [callState, setCallState] = useState<CallState>(CallState.LOBBY);
   const [userStream, setUserStream] = useState<MediaStream | null>(null);
@@ -359,13 +359,3 @@ const App: React.FC = () => {
     </div>
   );
 };
-
-export default App;
-
-// Helper components for icons to remove 'Video' conflict in imports above 
-// Re-exporting from lucide-react in ControlBar was cleaner, but App.tsx used direct imports.
-function VideoOff({ size }: { size: number }) {
-  return (
-    <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M2 2l20 20"/><path d="M16 16v1a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h2"/><path d="M23 7l-7 5 7 5V7z"/></svg>
-  );
-}
