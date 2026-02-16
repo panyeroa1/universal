@@ -35,11 +35,22 @@ const App: React.FC = () => {
   useEffect(() => {
     const initCamera = async () => {
       try {
+        // Try getting both video and audio
         const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
         setUserStream(stream);
+        setIsCameraOn(true);
       } catch (err) {
-        console.error("Camera access denied", err);
-        setError("Could not access camera/microphone. Please allow permissions.");
+        console.warn("Camera+Audio access failed, trying Audio only", err);
+        try {
+            // Fallback: Try audio only
+            const audioStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            setUserStream(audioStream);
+            setIsCameraOn(false); // Force camera off since we only have audio
+            setError(null);
+        } catch (audioErr) {
+            console.error("Audio access denied", audioErr);
+            setError("Could not access camera or microphone. Please check system permissions.");
+        }
       }
     };
     initCamera();
@@ -61,10 +72,35 @@ const App: React.FC = () => {
     }
   };
 
-  const toggleCamera = () => {
-    if (userStream) {
-      userStream.getVideoTracks().forEach(track => track.enabled = !isCameraOn);
-      setIsCameraOn(!isCameraOn);
+  const toggleCamera = async () => {
+    if (!userStream) return;
+
+    const videoTrack = userStream.getVideoTracks()[0];
+    
+    if (videoTrack) {
+        // If we have a video track (even if disabled), just toggle it
+        videoTrack.enabled = !isCameraOn;
+        setIsCameraOn(!isCameraOn);
+    } else {
+        // No video track available (audio-only mode)
+        // Try to upgrade to video if turning ON
+        if (!isCameraOn) {
+            try {
+                const newStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+                // Stop old tracks to release hardware
+                userStream.getTracks().forEach(t => t.stop());
+                
+                setUserStream(newStream);
+                setIsCameraOn(true);
+                setError(null);
+                
+                // If we are in a call, we might need to handle stream update logic here 
+                // but GeminiLiveService creates its own audio stream, so visual update is enough.
+            } catch (err) {
+                console.error("Failed to upgrade to video", err);
+                setError("Could not access camera. Continuing with audio only.");
+            }
+        }
     }
   };
 
@@ -135,20 +171,21 @@ const App: React.FC = () => {
             
             {/* Preview Tile */}
             <div className="relative w-full md:w-[600px] aspect-video bg-[#3c4043] rounded-2xl overflow-hidden shadow-2xl border border-[#5f6368]">
-               {userStream && (
+               {userStream && isCameraOn ? (
                    <video 
                     ref={ref => { if (ref) ref.srcObject = userStream; }}
                     autoPlay muted playsInline 
-                    className={`w-full h-full object-cover ${!isCameraOn ? 'hidden' : ''} -scale-x-100`}
+                    className={`w-full h-full object-cover -scale-x-100`}
                    />
-               )}
-               {!isCameraOn && (
-                   <div className="absolute inset-0 flex items-center justify-center">
-                       <div className="w-24 h-24 rounded-full bg-purple-500 flex items-center justify-center text-4xl">
+               ) : (
+                   <div className="absolute inset-0 flex items-center justify-center bg-[#202124]">
+                       <div className="w-24 h-24 rounded-full bg-purple-500 flex items-center justify-center text-4xl font-semibold shadow-lg">
                            Y
                        </div>
+                       {!userStream && <div className="absolute bottom-1/3 text-gray-400 text-sm">Loading camera...</div>}
                    </div>
                )}
+               
                <div className="absolute bottom-4 left-4 flex gap-4">
                    <button onClick={toggleMute} className={`p-3 rounded-full ${isMuted ? 'bg-red-500' : 'bg-[#3c4043] border border-gray-500'}`}>
                        {isMuted ? <MicOff size={20} /> : <Mic size={20} />}
@@ -175,15 +212,16 @@ const App: React.FC = () => {
                 
                 {error && (
                     <div className="bg-red-900/50 border border-red-500 text-red-200 p-3 rounded-lg flex items-center gap-2 text-sm max-w-xs">
-                        <AlertCircle size={16} />
-                        {error}
+                        <AlertCircle size={16} className="shrink-0" />
+                        <span>{error}</span>
                     </div>
                 )}
 
                 <div className="flex gap-4">
                     <button 
                         onClick={startCall}
-                        className="bg-[#8ab4f8] hover:bg-[#aecbfa] text-[#202124] px-8 py-3 rounded-full font-medium text-lg transition-transform active:scale-95 flex items-center gap-2 shadow-lg hover:shadow-blue-500/20"
+                        disabled={!userStream && !error} // Allow retrying if error, but disable if just loading
+                        className={`bg-[#8ab4f8] hover:bg-[#aecbfa] text-[#202124] px-8 py-3 rounded-full font-medium text-lg transition-transform active:scale-95 flex items-center gap-2 shadow-lg hover:shadow-blue-500/20 ${(!userStream && !error) ? 'opacity-50 cursor-not-allowed' : ''}`}
                     >
                         <Sparkles size={20} />
                         Join now
@@ -247,7 +285,7 @@ const App: React.FC = () => {
                     <div className="absolute bottom-6 right-6 w-48 h-32 md:w-64 md:h-40 bg-black rounded-xl overflow-hidden shadow-2xl border border-[#5f6368] z-10 hover:scale-105 transition-transform cursor-pointer">
                         <VideoTile 
                             name="You" 
-                            stream={userStream} 
+                            stream={isCameraOn ? userStream : null} 
                             isSelf={true}
                             isMuted={isMuted}
                         />
